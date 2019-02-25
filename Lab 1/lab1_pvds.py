@@ -231,6 +231,32 @@ def backface_culling():
     print("final_polygon: \n", final_polygon)
 
 
+class Edge(object):
+
+    def __init__(self):
+        self._edge_value = []
+
+    @proporty
+    def edge_value(self):
+        return self._edge_value
+
+    @edge_value.setter
+    def edge_value(self, value):
+        self._edge_value = []
+        self._edge_value.append(value)
+
+
+class EdgeTable(object):
+
+    def __init__(self):
+        self.count = 0
+        self._temp = []
+
+    @EdgeTable.setter
+    def _edge_temp(self):
+        todo
+
+
 if __name__ == "__main__":
 
     load_model()  # initiated model
