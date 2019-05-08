@@ -1,5 +1,5 @@
 # CSCI 6554
- This is Lab work in CSCI 6554 Computer Graphics II in George Washington University.
+ This is Lab work in Python of CSCI 6554 Computer Graphics II in George Washington University.
  
 Perspective Vector Display System
 ------------------------------------------
