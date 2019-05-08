@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 -------------------------------------------------
-   File Name：     lab2_Scanline_Zbuffer
+   File Name：     lab3_Shadings
    Description :
    Author :       zdf's desktop
    date：          2019/2/24
@@ -40,6 +40,15 @@ class Pixel:
         self.z = z
 
 
+class Vertex:
+
+    def __init__(self, cord, normal=None):
+        if normal is None:
+            normal = []
+        self.cord = cord
+        self.normal = normal
+
+
 class Polygon:
 
     def __init__(self):
@@ -48,6 +57,7 @@ class Polygon:
         self.main_color = (255, 255, 255)
         self.edge_table = []
         self.pixel_list = []  # all pixels inside this polygon(including vertex)
+        self.normal = np.zeros(3, dtype=np.float64) # the normal vector of polygon
 
     def print(self):
         """
@@ -60,6 +70,7 @@ class Polygon:
         print(self.main_color)
         print(self.edge_table)
         print(self.pixel_list)
+        print(self.normal)
 
 
 class Model:
@@ -103,11 +114,28 @@ class Model:
         for i, v in enumerate(self.raw_vertex):
             temp = [float(x) for x in v if x]
             temp.append(1)
-            self.raw_vertex[i] = temp
+            v = Vertex(temp, [])
+            self.raw_vertex[i] = v
 
         for i, p in enumerate(self.raw_polygon):
             temp = [int(x) for x in p if x]
             self.raw_polygon[i] = temp
+
+    def find_pologon_normal(self):
+        for p in self.final_polygon:
+            p.normal = np.zeros(3, dtype=np.float64)
+            v1 = self.raw_vertex[p.vertex_list[0] - 1].cord
+            v2 = self.raw_vertex[p.vertex_list[1] - 1].cord
+            v3 = self.raw_vertex[p.vertex_list[2] - 1].cord
+            print(v1, v2, v3)
+            v1 = v1[:-1]
+            v2 = v2[:-1]
+            v3 = v3[:-1]
+            e1 = np.subtract(v2, v1)
+            e2 = np.subtract(v3, v2)
+            p.normal = np.cross(e1, e2)
+            p.normal /= np.linalg.norm(p.normal)
+            print("p.normal = ", p.normal)
 
     def zoom_model(self, amplifier, shift):
         for v in self.final_vertex:
@@ -153,14 +181,12 @@ class Model:
 
     def scan_conversion(self):
         """
-        making a scan conversion on certain model
+        making a scan conversion on a certain model
         :return: None
         """
+        print("Start Scan conversion...")
         for p in self.final_polygon:
             AET = []  # Active edge table
-            p.maincolor = (random.randint(0, 255),
-                           random.randint(0, 255),
-                           random.randint(0, 255))  # using random color to fulfill polygon
             if not p.edge_table:  # ignoring empty edge_table
                 continue
             ymin = int(p.edge_table[0].ymin)  # ymin value among all edges
@@ -192,29 +218,32 @@ class Model:
                 AET.sort(key=x_cmp)  # re-sort AET by X value
         print("Finished Scanline conversion")
 
-    def fill_polygon(self):
-        """
-        Fill each polygon by pixel data, using Pyglet batch
-        :return: None
-        """
-        window = pyglet.window.Window(1920, 1080, resizable=True)
+    def illumination_model(self):
+        diffuse, specular, ambient = [0, 0, 0], [0, 0, 0], [0, 0, 0]
+        light_intensity = [0.0, 0.0, 0.0]
+        light_source = [0.5, 1.0, 0.8]  # color of light
+        # light_source[0] = 0.5
+        h_vector = np.zeros(3, dtype=np.float64)
+        light_direction = np.zeros(3, dtype=np.float64)
+        light_direction[0] = 1.5
+        print("LightDir = ", light_direction)
 
-        # vertex_list = pyglet.graphics.vertex_list(0)
+        view_direction = np.zeros(3, dtype=np.float64)
+        h_vector = light_direction + view_direction
+        h_vector /= np.linalg.norm(h_vector)
+        print("h_vector = ", h_vector)
 
-        @window.event
-        def on_draw():
-            window.clear()
-            glClear(GL_COLOR_BUFFER_BIT)
-            glLoadIdentity()
-            main_batch = pyglet.graphics.Batch()
-            for p in self.final_polygon:
-                color = p.maincolor
-                for pixel in p.pixel_list:
-                    main_batch.add(1, gl.GL_POINTS, None,
-                                   ('v2f', (pixel.x, pixel.y)),
-                                   ('c3B', color)
-                                   )
-            main_batch.draw()
+        kd = 0.3  # diffuse term
+        ks = 0.6  # specular term
+        ka = 0.2  # ambient term
+        for p in self.final_polygon:
+            for i in range(0, 3):
+                diffuse[i] = kd * light_source[i] * np.dot(p.normal, light_direction)
+                specular[i] = ks * light_source[i] * np.dot(p.normal, h_vector)
+                ambient[i] = ka * light_source[i]
+                light_intensity[i] = diffuse[i] + specular[i] + ambient[i]
+            print(tuple(light_intensity))
+            p.main_color = tuple(light_intensity)
 
 
 class Observer:
@@ -314,7 +343,7 @@ def calculate_vertex(model, observer):
     """
     model.final_vertex.append(ScreenVertex(0, 0))  # add a void vertex to make sure vertex index start from 1
     for i, v in enumerate(model.raw_vertex):
-        v = observer.pers_matrix @ observer.view_matrix @ v
+        v = observer.pers_matrix @ observer.view_matrix @ v.cord
         v[0] = v[0] / v[3]
         v[1] = v[1] / v[3]
         vertex = ScreenVertex(v[0], v[1])
@@ -330,7 +359,7 @@ def backface_culling(model, observer):
     """
     view_vertex = []  # vertex temp-list in view space
     for i, v in enumerate(model.raw_vertex):
-        v = observer.pers_matrix @ observer.view_matrix @ v  # vertex in view space
+        v = observer.pers_matrix @ observer.view_matrix @ v.cord  # vertex in view space
         view_vertex.append(v)
 
     for p in model.raw_polygon:
@@ -361,33 +390,36 @@ def fill_polygon(model_list):
 
     @window.event
     def on_draw():
+        print("Start drawing...")
         window.clear()
         glClear(GL_COLOR_BUFFER_BIT)
         glLoadIdentity()
         main_batch = pyglet.graphics.Batch()
         for i in model_list:
             for p in i.final_polygon:
-                color = p.maincolor
+                color = p.main_color
+                print("Current color:", color)
                 for pixel in p.pixel_list:
                     main_batch.add(1, gl.GL_POINTS, None,
                                    ('v2f', (pixel.x, pixel.y)),
-                                   ('c3B', color)
+                                   ('c3d', color)
                                    )
         main_batch.draw()
+        print("Finish drawing...")
 
 
 if __name__ == "__main__":
     model_list = []
     m1 = Model()
-    # m1.load_model('./atc.d.txt')
     # m1.load_model('./donut.d.txt')
     # m1.load_model('./car.d.txt')
-    # m1.load_model('./house.d.txt')
-    m1.load_model('./knight.d.txt')
+    # m1.load_model('./knight.d.txt')
+    m1.load_model('./queen.d.txt')
+    # m1.load_model('./cow.d.txt')
 
     o1 = Observer()
     o1.set_modeling_matrix([0, 0, 0])  # input local-to-world parameter
-    o1.set_viewing_matrix([20, 10, -5], [-1, -1, 0])  # input camera position and up-vector parameter
+    o1.set_viewing_matrix([23, 20, -10], [-1, -1, 0])  # input camera position and up-vector parameter
     o1.set_perspective_matrix(10, 80, 10)  # input Near & far volume and width
     o1.set_project_ref([0, 0, 0])  # input project reference
 
@@ -395,12 +427,14 @@ if __name__ == "__main__":
     o1.calculate_matrix()
 
     calculate_vertex(m1, o1)
-    m1.zoom_model(3500, 450)
+    m1.zoom_model(3000, 450)
 
     backface_culling(m1, o1)
 
     m1.create_edge_table()
     m1.scan_conversion()
+    m1.find_pologon_normal()
+    m1.illumination_model()
     model_list.append(m1)
 
     '''

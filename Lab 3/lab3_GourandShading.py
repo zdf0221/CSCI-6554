@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 -------------------------------------------------
-   File Name：     lab2_Scanline_Zbuffer
+   File Name：     lab3_Shadings
    Description :
    Author :       zdf's desktop
    date：          2019/2/24
@@ -18,11 +18,14 @@ from pyglet.gl import *
 
 class Edge:
 
-    def __init__(self):
+    def __init__(self, v1, v2):
+        # v1, v2 for two vertices of that edge
         self.ymax = 0
         self.ymin = 0
         self.xmin = 0
         self.slope = 0
+        self.v1 = v1
+        self.v2 = v2
 
 
 class ScreenVertex:
@@ -34,10 +37,26 @@ class ScreenVertex:
 
 class Pixel:
 
-    def __init__(self, x, y, z):
-        self.x = x
-        self.y = y
-        self.z = z
+    def __init__(self, cord=None, normal=None, color=(0.5, 0.5, 0.5)):
+        if normal is None:
+            normal = [0, 0, 0]
+        if cord is None:
+            cord = [0, 0]
+        self.cord = cord
+        self.normal = normal
+        self.color = color
+
+
+class Vertex:
+
+    def __init__(self, cord=None, color=(0.5, 0.5, 0.5), normal=None):
+        if cord is None:
+            cord = [0, 0, 0]
+        if normal is None:
+            normal = []
+        self.cord = cord
+        self.normal = normal
+        self.color = color
 
 
 class Polygon:
@@ -48,6 +67,7 @@ class Polygon:
         self.main_color = (255, 255, 255)
         self.edge_table = []
         self.pixel_list = []  # all pixels inside this polygon(including vertex)
+        self.normal = np.zeros(3, dtype=np.float64) # the normal vector of polygon
 
     def print(self):
         """
@@ -60,6 +80,33 @@ class Polygon:
         print(self.main_color)
         print(self.edge_table)
         print(self.pixel_list)
+        print(self.normal)
+
+
+def illumination_model(normal):
+    diffuse, specular, ambient = [0, 0, 0], [0, 0, 0], [0, 0, 0]
+    light_intensity = [0.0, 0.0, 0.0]
+    light_source = [0.4, 0.8, 0.9]  # color of light
+    h_vector = np.zeros(3, dtype=np.float64)
+    light_direction = np.zeros(3, dtype=np.float64)
+    light_direction = [0.8, -0.8, 0.5]
+    # print("LightDir = ", light_direction)
+
+    view_direction = np.zeros(3, dtype=np.float64)
+    h_vector = light_direction + view_direction
+    h_vector /= np.linalg.norm(h_vector)
+    # print("h_vector = ", h_vector)
+
+    kd = 0.3  # diffuse term
+    ks = 0.8  # specular term
+    ka = 0.3  # ambient term
+    for i in range(0, 3):
+        diffuse[i] = kd * light_source[i] * np.dot(normal, light_direction)
+        specular[i] = ks * light_source[i] * np.dot(normal, h_vector)
+        ambient[i] = ka * light_source[i]
+        light_intensity[i] = diffuse[i] + specular[i] + ambient[i]
+    # print(tuple(light_intensity))
+    return tuple(light_intensity)
 
 
 class Model:
@@ -103,11 +150,41 @@ class Model:
         for i, v in enumerate(self.raw_vertex):
             temp = [float(x) for x in v if x]
             temp.append(1)
-            self.raw_vertex[i] = temp
+            v = Vertex(temp, [], (0, 0, 0))
+            self.raw_vertex[i] = v
 
         for i, p in enumerate(self.raw_polygon):
             temp = [int(x) for x in p if x]
             self.raw_polygon[i] = temp
+
+    def find_pologon_normal(self):
+        for p in self.final_polygon:
+            p.normal = np.zeros(3, dtype=np.float64)
+            v1 = self.raw_vertex[p.vertex_list[0]].cord
+            v2 = self.raw_vertex[p.vertex_list[1]].cord
+            v3 = self.raw_vertex[p.vertex_list[2]].cord
+            # print(v1, v2, v3)
+            v1 = v1[:-1]
+            v2 = v2[:-1]
+            v3 = v3[:-1]
+            e1 = np.subtract(v2, v1)
+            e2 = np.subtract(v3, v2)
+            p.normal = np.cross(e1, e2)
+            p.normal /= np.linalg.norm(p.normal)
+            # print("p.normal = ", p.normal)
+
+    def find_vertex_color(self):
+        for i, v in enumerate(self.raw_vertex):
+            temp_normal = [0, 0, 0]
+            for p in self.final_polygon:
+                if i in p.vertex_list:
+                    temp_normal += p.normal
+            if np.linalg.norm(temp_normal):
+                temp_normal /= np.linalg.norm(temp_normal)
+            # print("Vertex Normal:", temp_normal)
+            v.normal = temp_normal
+            v.color = illumination_model(v.normal)
+        print("finishing vertex color calculation")
 
     def zoom_model(self, amplifier, shift):
         for v in self.final_vertex:
@@ -127,15 +204,18 @@ class Model:
                 to Visit proper vertex, you need to 
                 add -1 on index since the vertex are labeled start by 1, not 0.
                 '''
-                v1 = self.final_vertex[p.vertex_list[i]]
+                index1 = p.vertex_list[i]
                 if i == num - 1:
-                    v2 = self.final_vertex[p.vertex_list[0]]
+                    index2 = p.vertex_list[0]
                 else:
-                    v2 = self.final_vertex[p.vertex_list[i + 1]]
+                    index2 = p.vertex_list[i + 1]
+
+                v1 = self.final_vertex[index1]
+                v2 = self.final_vertex[index2]
                 if int(v1.y) == int(v2.y):
                     # skip the horizontal edge
                     continue
-                e = Edge()
+                e = Edge(self.raw_vertex[index1], self.raw_vertex[index2])
                 e.ymax = int(max(v1.y, v2.y))  # compare Y value of V1 and V2
                 e.ymin = int(min(v1.y, v2.y))
                 e.xmin = v1.x if v1.y < v2.y else v2.x  # store the x value of the bottom vertex
@@ -153,14 +233,12 @@ class Model:
 
     def scan_conversion(self):
         """
-        making a scan conversion on certain model
+        making a scan conversion on a certain model
         :return: None
         """
+        print("Start Scan conversion...")
         for p in self.final_polygon:
             AET = []  # Active edge table
-            p.maincolor = (random.randint(0, 255),
-                           random.randint(0, 255),
-                           random.randint(0, 255))  # using random color to fulfill polygon
             if not p.edge_table:  # ignoring empty edge_table
                 continue
             ymin = int(p.edge_table[0].ymin)  # ymin value among all edges
@@ -177,11 +255,35 @@ class Model:
                     return edge.xmin
 
                 AET.sort(key=x_cmp)  # re-sort AET by X value
-                for i in range(len(AET) // 2):
+                for i in range(0, len(AET) // 2, 2):
+                    l1 = list(AET[i].v1.color)
+                    l2 = list(AET[i].v2.color)
+                    l3 = list(AET[i + 1].v2.color)
+                    la = [0, 0, 0]
+                    lb = [0, 0, 0]
+                    for v in range(3):
+                        temp = AET[i].ymax - AET[i].ymin
+                        if temp == 0:
+                            temp = 1
+                        la[v] += l1[v] * (scanY - AET[i].ymin) / temp
+                        la[v] += l2[v] * (AET[i].ymax - scanY) / temp
+                    for v in range(3):
+                        temp = AET[i + 1].ymax - AET[i + 1].ymin  # deal with horizontal edge
+                        if temp == 0:
+                            temp = 1
+                        lb[v] += l1[v] * (scanY - AET[i + 1].ymin) / temp
+                        lb[v] += l3[v] * (AET[i + 1].ymax - scanY) / temp
+                    # print("la lb = ", la, lb)
                     for j in range(int(AET[i].xmin), int(AET[i + 1].xmin)):
                         # for each intersections between scanline and edge
                         # store all pixels coordinate between them into a pixel list
-                        pixel = Pixel(j, scanY, 0)
+                        lp = [0, 0, 0]
+                        for v in range(3):
+                            lp[v] = la[v] * (int(AET[i + 1].xmin) - j) / (int(AET[i + 1].xmin) - int(AET[i].xmin)) \
+                             + lb[v] * (j - int(AET[i].xmin)) / (int(AET[i + 1].xmin) - int(AET[i].xmin))
+                        # print("lp = ", lp)
+                        cord = [j, scanY]
+                        pixel = Pixel(cord, color=tuple(lp))
                         p.pixel_list.append(pixel)
 
                 for e in AET:
@@ -191,30 +293,6 @@ class Model:
                     e.xmin += e.slope  # adjust X value by coherence
                 AET.sort(key=x_cmp)  # re-sort AET by X value
         print("Finished Scanline conversion")
-
-    def fill_polygon(self):
-        """
-        Fill each polygon by pixel data, using Pyglet batch
-        :return: None
-        """
-        window = pyglet.window.Window(1920, 1080, resizable=True)
-
-        # vertex_list = pyglet.graphics.vertex_list(0)
-
-        @window.event
-        def on_draw():
-            window.clear()
-            glClear(GL_COLOR_BUFFER_BIT)
-            glLoadIdentity()
-            main_batch = pyglet.graphics.Batch()
-            for p in self.final_polygon:
-                color = p.maincolor
-                for pixel in p.pixel_list:
-                    main_batch.add(1, gl.GL_POINTS, None,
-                                   ('v2f', (pixel.x, pixel.y)),
-                                   ('c3B', color)
-                                   )
-            main_batch.draw()
 
 
 class Observer:
@@ -312,9 +390,13 @@ def calculate_vertex(model, observer):
     :param observer:
     :return:
     """
-    model.final_vertex.append(ScreenVertex(0, 0))  # add a void vertex to make sure vertex index start from 1
+    model.final_vertex.insert(0, ScreenVertex(0, 0))
+    model.raw_vertex.insert(0, Vertex())
+    # add a void vertex at leftmost to make sure vertex index start from 1
     for i, v in enumerate(model.raw_vertex):
-        v = observer.pers_matrix @ observer.view_matrix @ v
+        if i == 0:
+            continue
+        v = observer.pers_matrix @ observer.view_matrix @ v.cord
         v[0] = v[0] / v[3]
         v[1] = v[1] / v[3]
         vertex = ScreenVertex(v[0], v[1])
@@ -330,7 +412,9 @@ def backface_culling(model, observer):
     """
     view_vertex = []  # vertex temp-list in view space
     for i, v in enumerate(model.raw_vertex):
-        v = observer.pers_matrix @ observer.view_matrix @ v  # vertex in view space
+        if i == 0:
+            continue
+        v = observer.pers_matrix @ observer.view_matrix @ v.cord  # vertex in view space
         view_vertex.append(v)
 
     for p in model.raw_polygon:
@@ -361,33 +445,35 @@ def fill_polygon(model_list):
 
     @window.event
     def on_draw():
+        print("Start drawing...")
         window.clear()
         glClear(GL_COLOR_BUFFER_BIT)
         glLoadIdentity()
         main_batch = pyglet.graphics.Batch()
         for i in model_list:
             for p in i.final_polygon:
-                color = p.maincolor
                 for pixel in p.pixel_list:
+                    # print("color = ", pixel.color)
                     main_batch.add(1, gl.GL_POINTS, None,
-                                   ('v2f', (pixel.x, pixel.y)),
-                                   ('c3B', color)
+                                   ('v2f', (pixel.cord[0], pixel.cord[1])),
+                                   ('c3d', pixel.color)
                                    )
         main_batch.draw()
+        print("Finish drawing...")
 
 
 if __name__ == "__main__":
     model_list = []
     m1 = Model()
-    # m1.load_model('./atc.d.txt')
     # m1.load_model('./donut.d.txt')
     # m1.load_model('./car.d.txt')
-    # m1.load_model('./house.d.txt')
-    m1.load_model('./knight.d.txt')
+    # m1.load_model('./knight.d.txt')
+    m1.load_model('./queen.d.txt')
+    # m1.load_model('./cow.d.txt')
 
     o1 = Observer()
     o1.set_modeling_matrix([0, 0, 0])  # input local-to-world parameter
-    o1.set_viewing_matrix([20, 10, -5], [-1, -1, 0])  # input camera position and up-vector parameter
+    o1.set_viewing_matrix([23, 20, -10], [-1, -1, 0])  # input camera position and up-vector parameter
     o1.set_perspective_matrix(10, 80, 10)  # input Near & far volume and width
     o1.set_project_ref([0, 0, 0])  # input project reference
 
@@ -395,12 +481,16 @@ if __name__ == "__main__":
     o1.calculate_matrix()
 
     calculate_vertex(m1, o1)
-    m1.zoom_model(3500, 450)
+    m1.zoom_model(3000, 450)
 
     backface_culling(m1, o1)
 
+    m1.find_pologon_normal()
+    m1.find_vertex_color()
+
     m1.create_edge_table()
     m1.scan_conversion()
+
     model_list.append(m1)
 
     '''
